@@ -1,11 +1,11 @@
 const express = require('express');
-const app = express();
-app.use(express.json());
+const ExpressError = require('../expressError');
+const db = require('../db');
 
-const db = require('./db');
+let router = new express.Router();
 
 // Returns info on invoices
-app.get('/invoices', async (req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
         const results = await db.query(
             'SELECT * FROM invoices'
@@ -17,18 +17,19 @@ app.get('/invoices', async (req, res, next) => {
 });
 
 // Returns given invoice object. Returns 404 if not found
-app.get('/invoices/:id', async (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
     try {
+        let id = req.params.id;
         const invoiceRes = await db.query(
             `SELECT invoices.id,invoices.amt,invoices.paid,invoices.add_date,invoices.paid_date, companies.* 
             FROM invoices
             JOIN companies ON companies.code=invoices.comp_code
             WHERE invoices.id=$1`,
-            [req.params.id]
+            [id]
         );
         
-        if (invoice.rowCount === 0) {
-            return res.status(404).json({message: "Invoice not found"});
+        if (invoiceRes.rowCount === 0) {
+            throw new ExpressError(`Invoice not found: ${id}`, 404);
         }
         return res.status(200).json({invoice: invoiceRes.rows[0]});
     } catch (err) {
@@ -37,7 +38,7 @@ app.get('/invoices/:id', async (req, res, next) => {
 });
 
 // Adds an invoice, given company code and amount
-app.post('/invoices', async (req, res, next) => {
+router.post('/', async (req, res, next) => {
     try {
         const { comp_code, amt } = req.body;
 
@@ -54,21 +55,40 @@ app.post('/invoices', async (req, res, next) => {
     }
 });
 
-// Updates an invoice with a given amount. Returns 404 if not found
-app.put('./invoices/:id', async (req, res, next) => {
+// Updates an invoice with a given amount or clears paid_date if marking unpaid. Returns 404 if not found
+router.put('/:id', async (req, res, next) => {
     try {
-        const invoice = req.params.id;
-        const amount = req.body;
+        const {amt, paid} = req.body;
+        const id = req.params.id;
+        let paidDate = null;
+
+        const currResult = await db.query(
+            `SELECT paid
+            FROM invoices
+            WHERE id = $1`,
+            [id]
+        );
+
+        if (currResult.rows.length === 0) {
+            throw new ExpressError(`Invoice not found ${id}`, 404);
+        }
+        const currPaidDate = currResult.rows[0].paid_date;
+
+        if (!currPaidDate && paid) {
+            paidDate = new Date();
+        } else if (!paid) {
+            paidDate = null
+        } else {
+            paidDate = currPaidDate;
+        }
 
         const result = await db.query (
-            `UPDATE invoices SET amt=$1
-            WHERE id=$2
+            `UPDATE invoices SET amt=$1, paid=$2, paid_date=$3
+            WHERE id=$4
             RETURNING id, comp_code, amt, paid, add_date, paid_date`,
-            [amount, invoice]
+            [amt, paid, paidDate, id]
         );
-        if (result.rowCount === 0) {
-            return res.status(404).json({message: "Invoice not found"});
-        }
+    
         return res.status(204).json({invoice: result.rows[0]});
     } catch (err) {
         next(err);
@@ -76,19 +96,21 @@ app.put('./invoices/:id', async (req, res, next) => {
 });
 
 // Deletes an invoice. Returns 404 if not found
-app.delete('/invoices/:id', async (req, res, next) => {
+router.delete('/:id', async (req, res, next) => {
     try {
-        const invoice = req.params.id;
+        const id = req.params.id;
 
         const result = await db.query(
             `DELETE FROM invoices WHERE id=$1`,
-            [invoice]
+            [id]
         );
         if(result.rowCount === 0) {
-            return res.status(404).json({message: "Invoice not found"});
+            throw new ExpressError(`Invoice not found ${id}`, 404);
         }
         return res.status(204).json({status: "deleted"});
     } catch (err) {
         next(err);
     }
 });
+
+module.exports = router;

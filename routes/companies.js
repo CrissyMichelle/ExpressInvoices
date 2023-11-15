@@ -1,8 +1,9 @@
 const express = require('express');
+const slugify = require("slugify");
 const app = express();
 app.use(express.json());
 
-const db = require('./db');
+const db = require('../db');
 
 // Returns list of companies
 app.get('/companies', async (req, res, next) => {
@@ -23,7 +24,7 @@ app.get('/companies/:code', async (req, res, next) => {
             `SELECT * FROM companies WHERE code=$1`,
             [req.params.code]
         );
-        if (company.rowCount === 0) {
+        if (companyRes.rowCount === 0) {
             return res.status(404).json({message: "Company not found"});
         }
 
@@ -41,9 +42,10 @@ app.get('/companies/:code', async (req, res, next) => {
 });
 
 // Adds a new company, returning the added row
-app.post('/companies/', async (req, res, next) => {
+app.post('/companies', async (req, res, next) => {
     try {
-        const { code, name, description } = req.body;
+        const { name, description } = req.body;
+        let code = slugify(name, {lower: true});
 
         const result = await db.query(
             `INSERT INTO companies (code, name, description)
@@ -96,3 +98,5 @@ app.delete('/companies/:code', async (req, res, next) => {
         return next(err);
     }
 });
+
+module.exports = app;
